@@ -2,7 +2,6 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_USERNAME = 'deepu09567'
         IMAGE_NAME = 'deepu09567/static-website5'
         IMAGE_TAG = 'latest'
         CONTAINER_NAME = 'static-website5'
@@ -31,26 +30,51 @@ pipeline {
             }
         }
 
-        stage('Stop Old Container') {
+        stage('Docker Login') {
             steps {
-                echo 'Stopping old container if running...'
+                echo 'Logging in to Docker Hub...'
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials-new',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    bat """
+                        "%DOCKER%" login -u "%DOCKER_USER%" -p "%DOCKER_PASS%"
+                    """
+                }
+            }
+        }
+
+        stage('Docker Push') {
+            steps {
+                echo 'Pushing image to Docker Hub...'
 
                 bat """
-                    "%DOCKER%" stop %CONTAINER_NAME% || exit /b 0
-                    "%DOCKER%" rm %CONTAINER_NAME% || exit /b 0
+                    "%DOCKER%" push %IMAGE_NAME%:%IMAGE_TAG%
                 """
             }
         }
 
-        stage('Run Container') {
+        stage('Kubernetes Deploy') {
             steps {
-                echo 'Starting new container...'
+                echo 'Deploying application to Kubernetes...'
 
                 bat """
-                    "%DOCKER%" run -d ^
-                    --name %CONTAINER_NAME% ^
-                    -p 8077:80 ^
-                    %IMAGE_NAME%:%IMAGE_TAG%
+                    kubectl apply -f k8.yaml
+                """
+            }
+        }
+
+        stage('Kubernetes Status') {
+            steps {
+                echo 'Checking Kubernetes resources...'
+
+                bat """
+                    kubectl get pods
+                    kubectl get services
                 """
             }
         }
@@ -59,8 +83,7 @@ pipeline {
     post {
         success {
             echo '======================================'
-            echo 'Static Website Deployed Successfully!'
-            echo 'Website: http://localhost:8077'
+            echo 'Deployment Successful!'
             echo '======================================'
         }
 
