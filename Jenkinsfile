@@ -65,7 +65,7 @@ pipeline {
                 echo 'Deploying application to Kubernetes...'
 
                 bat """
-                    kubectl apply -f k8.yaml
+                    kubectl apply -f k8s.yaml
                 """
             }
         }
