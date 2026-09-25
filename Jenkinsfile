@@ -10,7 +10,7 @@ pipeline {
 
         PATH = "C:\\Users\\Ankit\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
 
-        KUBECONFIG = 'C:\\Users\\Ankit\\.kube\\config'
+        
     }
 
     stages {
