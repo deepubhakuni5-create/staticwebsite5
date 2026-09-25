@@ -1,91 +1,141 @@
 pipeline {
-    agent any
+agent any
+environment {
+    IMAGE_NAME = "deepu09567/staticwebsite5"
+    IMAGE_TAG = "${BUILD_NUMBER}"
+    DOCKER_EXE = "C:\\Users\\Ankit\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe"
+    DOCKER_CONFIG = "${WORKSPACE}\\.docker"
+}
 
-    environment {
-        IMAGE_NAME = 'deepu09567/staticwebsite_pipleline'
+stages {
 
-        DOCKER_PATH = 'C:/Users/Ankit/AppData/Local/Programs/DockerDesktop/resources/bin/docker.exe'
+    stage('Checkout') {
+        steps {
+            echo 'Checking out source code...'
+
+            git branch: 'main',
+                url: 'https://github.com/deepubhakuni5-create/staticwebsite5.git'
+        }
     }
 
-    stages {
+    stage('Build Docker Image') {
+        steps {
+            echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
 
-        stage('Checkout') {
-            steps {
-                echo 'Checking out source code...'
-            }
+            bat """
+                if not exist "%DOCKER_CONFIG%" mkdir "%DOCKER_CONFIG%"
+                "%DOCKER_EXE%" build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                "%DOCKER_EXE%" tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+            """
         }
+    }
 
-        stage('Check Docker') {
-            steps {
+    stage('Test Docker Hub Credential') {
+        steps {
+            echo 'Testing Docker Hub credential...'
+
+            withCredentials([
+                usernamePassword(
+                    credentialsId: 'dockerhub-deepcreds',
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )
+            ]) {
                 bat '''
-                    "%DOCKER_PATH%" --version
-                '''
-            }
-        }
+                    echo Username: %DOCKER_USERNAME%
 
-        stage('Docker Build') {
-            steps {
-                echo 'Building Docker image...'
-
-                bat '''
-                    "%DOCKER_PATH%" build -t %IMAGE_NAME%:latest .
-                '''
-            }
-        }
-
-        stage('Docker Login') {
-            steps {
-                echo 'Logging into Docker Hub...'
-
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-credentials-new',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASSWORD'
+                    if "%DOCKER_PASSWORD%"=="" (
+                        echo PASSWORD IS EMPTY
+                        exit /b 1
+                    ) else (
+                        echo PASSWORD RECEIVED
                     )
-                ]) {
-                    bat '''
-                        echo %DOCKER_PASSWORD% | "%DOCKER_PATH%" login -u %DOCKER_USER% --password-stdin
-                    '''
+                '''
+            }
+        }
+    }
+
+    stage('Login to Docker Hub') {
+        steps {
+            echo 'Logging in to Docker Hub...'
+
+            withCredentials([
+                usernamePassword(
+                    credentialsId: 'dockerhub-deepcreds',
+                    usernameVariable: 'DOCKER_USERNAME',
+                    passwordVariable: 'DOCKER_PASSWORD'
+                )
+            ]) {
+                bat '''
+                    echo %DOCKER_PASSWORD% | "%DOCKER_EXE%" login -u "%DOCKER_USERNAME%" --password-stdin
+
+                    if %ERRORLEVEL% NEQ 0 (
+                        echo Docker Hub login failed
+                        exit /b 1
+                    )
+                '''
+            }
+        }
+    }
+
+    stage('Push to Docker Hub') {
+        steps {
+            echo "Pushing ${IMAGE_NAME}:${IMAGE_TAG} to Docker Hub..."
+
+            bat """
+                "%DOCKER_EXE%" push ${IMAGE_NAME}:${IMAGE_TAG}
+                "%DOCKER_EXE%" push ${IMAGE_NAME}:latest
+            """
+        }
+    }
+
+    stage('Update k8s.yaml Image Tag') {
+        steps {
+            echo "Updating Kubernetes image tag to ${IMAGE_TAG}..."
+
+            powershell """
+                if (!(Test-Path "k8s.yaml")) {
+                    Write-Error "k8s.yaml file not found!"
+                    exit 1
                 }
-            }
-        }
 
-        stage('Docker Push') {
-            steps {
-                echo 'Pushing image to Docker Hub...'
+                (Get-Content "k8s.yaml") -replace 'image:\\s*${IMAGE_NAME}:.*', 'image: ${IMAGE_NAME}:${IMAGE_TAG}' | Set-Content "k8s.yaml"
 
-                bat '''
-                    "%DOCKER_PATH%" push %IMAGE_NAME%:latest
-                '''
-            }
-        }
-
-        stage('Deploy Container') {
-            steps {
-                echo 'Deploying container...'
-
-                bat '''
-                    "%DOCKER_PATH%" stop staticwebsite 2>NUL || exit 0
-
-                    "%DOCKER_PATH%" rm staticwebsite 2>NUL || exit 0
-
-                    "%DOCKER_PATH%" pull %IMAGE_NAME%:latest
-
-                    "%DOCKER_PATH%" run -d --name staticwebsite -p 8080:80 %IMAGE_NAME%:latest
-                '''
-            }
+                Write-Host "k8s.yaml updated successfully."
+            """
         }
     }
 
-    post {
-        success {
-            echo 'CI/CD Pipeline completed successfully!'
-            echo 'Website: http://localhost:8080'
-        }
+    stage('Deploy to Minikube') {
+        steps {
+            echo 'Deploying application to Minikube...'
 
-        failure {
-            echo 'CI/CD Pipeline failed.'
+            bat '''
+                kubectl apply -f k8s.yaml
+            '''
         }
     }
+}
+
+post {
+    success {
+        echo "========================================"
+        echo "Pipeline completed successfully!"
+        echo "Docker Image: ${IMAGE_NAME}:${IMAGE_TAG}"
+        echo "========================================"
+    }
+
+    failure {
+        echo "========================================"
+        echo "Pipeline FAILED!"
+        echo "Check the Console Output."
+        echo "========================================"
+    }
+
+    always {
+        bat '''
+            "%DOCKER_EXE%" logout
+        '''
+    }
+}
 }
